@@ -30,7 +30,7 @@ PDF・学習記録は利用者のブラウザ内に保存されます。教材�
 
 色検出のため、図や写真の赤い部分も隠れます。黒字の答えは隠れません。印刷・スキャン状態や色味によっては完全に隠れない場合があるため、学習前に確認してください。パスワード保護PDFは解除してから取り込んでください。教材の取り扱いは学校・配信元のルールに従ってください。本アプリはロイロノート・スクールの公式アプリではありません。
 
-アプリの文字表示にGoogle Fontsを利用します（読み込み不可・オフライン時はシステムフォント）。PDF.js関連のフォント・CMap・画像デコーダーは同じ公開サイトに同梱し、PDF閲覧時に外部CDNへアクセスしません。
+アプリの文字表示にはシステムフォントを利用します。PDF.js関連のフォント・CMap・画像デコーダーは同じ公開サイトに同梱し、PDF閲覧時に外部CDNへアクセスしません。
 
 ## ローカル開発
 
@@ -47,7 +47,9 @@ npm run build
 npm run preview
 ```
 
-画素単位の検証は `npm test`。ブラウザの操作検証は `tests/e2e.mjs` に用意しています（PlaywrightとChromiumが必要）。
+画素単位の検証は `npm test`。ブラウザの操作検証は、開発サーバーを起動してから `npm run test:e2e`。Chromiumが必要です（`npx playwright-core install chromium`、または `CHROMIUM_PATH` で実行ファイルを指定）。`AKASHEET_TEST_URL` で検証先、`AKASHEET_QA_DIR` でスクリーンショットの保存先を変更できます。
+
+オフライン・サブディレクトリ配信の検証は、`npm run build` 後、別ターミナルで `npm run preview -- --port 4173 --base /annki/` を起動し、`npm run test:offline` を実行します。
 
 ## GitHub Pagesへの公開
 

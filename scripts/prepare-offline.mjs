@@ -9,6 +9,7 @@ async function files(dir) {
 const paths = (await files('dist')).filter(path => !path.endsWith('/sw.js')).sort();
 const hash = createHash('sha256');
 for (const path of paths) hash.update(await readFile(path));
+hash.update(await readFile('public/sw.js'));
 const id = hash.digest('hex').slice(0, 12);
 const precache = ['./', ...paths.map(path => `./${relative('dist', path)}`)];
 let source = await readFile('public/sw.js', 'utf8');

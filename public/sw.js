@@ -9,5 +9,5 @@ self.addEventListener('fetch', event => {
   event.respondWith(fetch(request).then(response => {
     if (response.ok && !request.headers.has('range')) { const copy = response.clone(); void caches.open(CACHE).then(cache => cache.put(request, copy)); }
     return response;
-  }).catch(() => caches.match(request).then(cached => cached || (request.mode === 'navigate' ? caches.match(ROOT.href) : undefined)).then(response => response || new Response('オフラインです。接続してからもう一度お試しください。', { status: 503, headers: { 'Content-Type': 'text/plain;charset=utf-8' } }))));
+  }).catch(() => caches.match(request, { ignoreVary: true }).then(cached => cached || (request.mode === 'navigate' ? caches.match(ROOT.href, { ignoreVary: true }) : undefined)).then(response => response || new Response('オフラインです。接続してからもう一度お試しください。', { status: 503, headers: { 'Content-Type': 'text/plain;charset=utf-8' } }))));
 });
