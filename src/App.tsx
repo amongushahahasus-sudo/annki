@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEv
 import { ArrowDownToLine, ArrowLeft, ArrowRight, BookOpen, Bookmark, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, FilePlus2, FileText, FolderOpen, HardDrive, LayoutGrid, Link2, LoaderCircle, Maximize2, MoreHorizontal, Plus, Search, Settings2, ShieldCheck, Sparkles, Trash2, Upload, X, ZoomIn, ZoomOut, Eye, Keyboard, PanelLeftClose } from 'lucide-react';
 import { openPdf, renderPage, applyRedSheet } from './lib/pdf';
 import { listSheets, putSheet, deleteSheet, type SheetRecord } from './lib/storage';
+import { AuthProvider, useAuth, AccountButton } from './auth/AuthProvider';
+import './auth/auth.css';
 
 type PdfDocument = Awaited<ReturnType<typeof openPdf>>;
 const SUBJECTS = ['未分類', '英語', '国語', '数学', '理科', '社会', 'その他'];
@@ -57,7 +59,20 @@ function HeroPreview({ onTry }: { onTry: () => void }) {
 }
 
 function App() {
+  return <AuthProvider><AuthRoot /></AuthProvider>;
+}
+
+function AuthRoot() {
+  const { user, ready } = useAuth();
+  if (!ready) return <div className="auth-initializing" role="status"><LoaderCircle size={25} className="spin" /><span>赤シートを準備しています…</span></div>;
+  const ownerId = user?.id || 'guest';
+  return <StudyApp key={ownerId} ownerId={ownerId} />;
+}
+
+function StudyApp({ ownerId }: { ownerId: string }) {
+  const { user } = useAuth();
   const [sheets, setSheets] = useState<SheetRecord[]>([]);
+  const [guestSheetsCount, setGuestSheetsCount] = useState(0);
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState('');
   const [subject, setSubject] = useState('すべて');
@@ -74,13 +89,37 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dismissModal = useCallback(() => setModal(null), []);
   const notify = useCallback((text: string, error = false) => setNotice({ text, error }), []);
-  useEffect(() => { void listSheets().then(setSheets).catch(() => notify('端末保存を利用できません。ブラウザのストレージ設定を確認してください。', true)).finally(() => setReady(true)); }, [notify]);
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([listSheets(ownerId), ownerId === 'guest' ? Promise.resolve([]) : listSheets()]).then(([own, guest]) => {
+      if (!alive) return;
+      setSheets(own);
+      const ids = new Set(own.map(sheet => sheet.id));
+      setGuestSheetsCount(guest.filter(sheet => !ids.has(sheet.id)).length);
+    }).catch(() => { if (alive) notify('端末保存を利用できません。ブラウザのストレージ設定を確認してください。', true); }).finally(() => { if (alive) setReady(true); });
+    return () => { alive = false; };
+  }, [notify, ownerId]);
   useEffect(() => { if (!notice) return; const timer = window.setTimeout(() => setNotice(null), 6500); return () => clearTimeout(timer); }, [notice]);
 
   const persist = useCallback(async (sheet: SheetRecord) => {
-    await putSheet(sheet);
+    await putSheet(sheet, ownerId);
     setSheets(all => [...all.filter(s => s.id !== sheet.id), sheet]);
-  }, []);
+  }, [ownerId]);
+
+  async function copyGuestSheets() {
+    if (busy || ownerId === 'guest') return;
+    setBusy('ゲストの教材をコピーしています…');
+    let copied = 0;
+    try {
+      const existing = new Set(sheets.map(sheet => sheet.id));
+      for (const sheet of await listSheets()) {
+        if (!existing.has(sheet.id)) { await persist(sheet); copied++; }
+      }
+      setGuestSheetsCount(0);
+      notify(`${copied}件の教材をこのアカウントの端末保存にコピーしました`);
+    } catch { notify(`${copied}件をコピーしました。残りを保存する空き容量があるか確認し、もう一度お試しください。`, true); }
+    finally { setBusy(''); }
+  }
 
   async function importFiles(files: File[] | FileList) {
     if (busy) return;
@@ -152,17 +191,17 @@ function App() {
     <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple className="visually-hidden" onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) void importFiles(e.target.files); }} aria-label="PDFファイルを選択" />
     {active ? <Viewer sheet={active} save={persist} close={() => setActive(null)} notify={notify} /> : <div className="app-shell">
       <aside className="sidebar"><Logo /><div className="sidebar-section-label">YOUR WORKSPACE</div><nav aria-label="メインメニュー"><button className={!bookmarksOnly ? 'nav-item selected' : 'nav-item'} onClick={() => setBookmarksOnly(false)}><LayoutGrid size={19} /> マイライブラリ <span>{sheets.length}</span></button><button className={bookmarksOnly ? 'nav-item selected' : 'nav-item'} onClick={() => setBookmarksOnly(true)}><Bookmark size={19} /> しおりのある教材 <span>{sheets.filter(s => s.bookmarks.length).length}</span></button></nav><button className="sidebar-add" onClick={() => inputRef.current?.click()} disabled={!!busy}><Plus size={18} /> PDFを追加</button><div className="sidebar-bottom"><div className="local-card"><span className="local-icon"><ShieldCheck size={20} /></span><strong>教材は、あなたの端末に。</strong><p>取り込んだPDFはこのブラウザに保存されます。</p><button onClick={() => setModal('storage')}>保存状況を見る <ArrowRight size={13} /></button></div><button className="sidebar-help" onClick={() => setModal('help')}><CircleHelp size={18} /> 使い方・よくある質問 <ArrowRight size={15} /></button><p className="sidebar-footnote">毎日の「覚えた」を、少しずつ。</p></div></aside>
-      <div className="main-shell"><header className="topbar"><div className="mobile-brand"><Logo small /></div><div className="breadcrumb"><FolderOpen size={16} /><span>ワークスペース</span><ChevronRight size={13} /><strong>{bookmarksOnly ? 'しおりのある教材' : 'マイライブラリ'}</strong></div><div className="topbar-status"><span className="status-dot" /> ログイン不要 <span className="topbar-divider" /><HardDrive size={15} /> 端末に保存</div><button className="icon-button mobile-help" aria-label="使い方" onClick={() => setModal('help')}><CircleHelp size={20} /></button></header>
+      <div className="main-shell"><header className="topbar"><div className="mobile-brand"><Logo small /></div><div className="breadcrumb"><FolderOpen size={16} /><span>ワークスペース</span><ChevronRight size={13} /><strong>{bookmarksOnly ? 'しおりのある教材' : 'マイライブラリ'}</strong></div><div className="topbar-actions"><div className="topbar-status"><span className="status-dot" /> {user ? 'ログイン中' : 'ゲストで利用中'} <span className="topbar-divider" /><HardDrive size={15} /> 端末に保存</div><AccountButton /><button className="icon-button mobile-help" aria-label="使い方" onClick={() => setModal('help')}><CircleHelp size={20} /></button></div></header>
       <main className="library-main"><section className="hero"><div className="hero-copy"><div className="eyebrow"><span /> STUDY AT YOUR OWN PACE</div><h1>いつものPDFを、<br /><span>覚える時間に。</span></h1><p>学校のプリントも、自分のまとめも。<br />赤字を隠して、確かめて。あなたのペースで覚えよう。</p><button className="text-link" onClick={() => setModal('help')}>はじめての方へ <ArrowUpRightIcon /></button></div><HeroPreview onTry={() => void trySample()} /></section>
       <section className={`upload-zone ${dragging ? 'dragging' : ''}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }} onDrop={drop} aria-label="PDFの取り込み"><div className="upload-symbol"><FilePlus2 size={25} strokeWidth={1.5} /><span><Plus size={12} /></span></div><div className="upload-copy"><h2>PDFをここにドロップ</h2><p>ロイロノートなどから保存した教材を、そのまま。</p><span>PDF形式・1ファイル50 MBまで・複数選択OK</span></div><div className="upload-actions"><button className="button primary" onClick={() => inputRef.current?.click()} disabled={!!busy}><Upload size={17} /> PDFを選ぶ</button><button className="url-button" onClick={() => setModal('url')}><Link2 size={14} /> URLから読み込む</button></div></section>
-      <section className="library-section"><div className="section-heading"><div><h2>{bookmarksOnly ? 'しおりのある教材' : 'マイライブラリ'} <span>{visible.length}</span></h2><p>続きから、いつでも。</p></div><div className="library-tools"><label className="search-field"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="教材を検索" aria-label="教材を検索" />{query && <button onClick={() => setQuery('')} aria-label="検索をクリア"><X size={14} /></button>}</label><label className="sort-field"><select value={sort} onChange={e => setSort(e.target.value)} aria-label="並び順"><option value="recent">最近開いた順</option><option value="created">追加した順</option><option value="name">名前順</option></select><ChevronDown size={14} /></label></div></div><div className="subject-tabs" aria-label="教科で絞り込む">{['すべて', ...SUBJECTS.filter(s => sheets.some(item => item.subject === s))].map(s => <button key={s} onClick={() => setSubject(s)} aria-pressed={subject === s} className={subject === s ? 'active' : ''}>{s}</button>)}</div>
+      <section className="library-section">{guestSheetsCount > 0 && <div className="guest-import-banner"><HardDrive size={21} /><div><strong>ログイン前の教材が{guestSheetsCount}件あります</strong><p>ゲストで保存した教材を、このアカウントにもコピーできます。</p></div><button className="button secondary" onClick={() => void copyGuestSheets()} disabled={!!busy}>ゲストの教材をコピー</button></div>}<div className="section-heading"><div><h2>{bookmarksOnly ? 'しおりのある教材' : 'マイライブラリ'} <span>{visible.length}</span></h2><p>続きから、いつでも。</p></div><div className="library-tools"><label className="search-field"><Search size={16} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="教材を検索" aria-label="教材を検索" />{query && <button onClick={() => setQuery('')} aria-label="検索をクリア"><X size={14} /></button>}</label><label className="sort-field"><select value={sort} onChange={e => setSort(e.target.value)} aria-label="並び順"><option value="recent">最近開いた順</option><option value="created">追加した順</option><option value="name">名前順</option></select><ChevronDown size={14} /></label></div></div><div className="subject-tabs" aria-label="教科で絞り込む">{['すべて', ...SUBJECTS.filter(s => sheets.some(item => item.subject === s))].map(s => <button key={s} onClick={() => setSubject(s)} aria-pressed={subject === s} className={subject === s ? 'active' : ''}>{s}</button>)}</div>
       {!ready ? <div className="empty-state"><LoaderCircle className="spin" /><p>ライブラリを読み込んでいます…</p></div> : visible.length ? <div className="sheet-grid">{visible.map(sheet => <article className="sheet-card" key={sheet.id}><button className="card-open" onClick={() => setActive(sheet)} aria-label={`${sheet.name}を開く`}><SheetThumbnail sheet={sheet} /><div className="card-content"><div className="card-meta"><span className={`subject-chip subject-${SUBJECTS.indexOf(sheet.subject)}`}>{sheet.subject}</span><span>{sheet.totalPages}ページ</span></div><h3>{sheet.name}</h3><div className="card-footer"><span>{dateText(sheet.lastOpened)}に開きました</span><span>{sheet.page} / {sheet.totalPages} <ArrowRight size={14} /></span></div></div></button><button className="card-menu icon-button" onClick={() => setEditing(sheet)} aria-label={`${sheet.name}の設定`}><MoreHorizontal size={18} /></button>{sheet.bookmarks.length > 0 && <span className="bookmark-badge"><Bookmark size={12} fill="currentColor" /> {sheet.bookmarks.length}</span>}</article>)}<button className="add-card" onClick={() => inputRef.current?.click()}><span><Plus size={24} /></span><strong>新しい教材を追加</strong><small>次の「覚えた」をはじめよう</small></button></div> : <div className="empty-state">{sheets.length ? <><Search size={30} /><h3>教材が見つかりませんでした</h3><p>検索する言葉や教科を変えてみてください。</p><button className="text-link" onClick={() => { setQuery(''); setSubject('すべて'); setBookmarksOnly(false); }}>絞り込みをリセット <ArrowRight size={15} /></button></> : <><span className="empty-icon"><BookOpen size={30} strokeWidth={1.4} /></span><h3>最初の1枚から、はじめよう。</h3><p>PDFを追加すると、ここに教材が並びます。</p><button className="sample-button" onClick={() => void trySample()} disabled={!!busy}><Sparkles size={16} /> サンプルPDFで試す <ArrowRight size={16} /></button></>}</div>}</section>
       <section className="how-strip" aria-label="3ステップの使い方"><div><span>01</span><p><strong>PDFを取り込む</strong>端末に保存した教材を選択</p></div><ChevronRight size={17} /><div><span>02</span><p><strong>赤シートをON</strong>赤い答えを隠して考える</p></div><ChevronRight size={17} /><div><span>03</span><p><strong>答えを確かめる</strong>OFFにして、もう一度</p></div></section><footer className="main-footer"><span>赤シート <i>—</i> 小さな積み重ねを、力に。</span><button onClick={() => setModal('help')}>使い方とプライバシー <ArrowRight size={13} /></button></footer></main></div></div>}
-    {modal === 'help' && <Modal title="赤シートの使い方" close={dismissModal}><div className="help-content"><p className="modal-lead">いつもの教材で、隠す → 考える → 確かめる。</p><ol className="help-steps"><li><strong>教材のPDFを端末に保存</strong><p>ロイロノート・スクールなどで教材を開き、「共有」「書き出す」などからPDFを「ファイル」や「ダウンロード」に保存します。操作名は配信サービス・端末で異なります。</p></li><li><strong>「PDFを選ぶ」から取り込む</strong><p>保存したPDFを選択。iPhone・iPadでも「ファイル」から読み込めます。学校アカウントとの直接連携はありません。</p></li><li><strong>赤シートを切り替えて暗記</strong><p>ONで赤い文字を隠し、OFFで答えを表示。「押して答えを見る」は、押している間だけ答えを表示します。赤字が残る場合は「調整」で感度を上げてください。</p></li></ol><div className="info-box"><Keyboard size={19} /><p><strong>パソコンのショートカット</strong><br />Space：赤シート切り替え　← →：ページ移動<br />B：しおり　Esc：ライブラリに戻る</p></div><h3>保存とプライバシー</h3><p>PDF・しおり・読んだページは、この端末のこのブラウザだけに保存されます。アプリから教材をサーバーにアップロードすることはありません。ブラウザのデータ削除で教材も消えるため、元のPDFは保管してください。共有端末では使用後にライブラリから教材を削除してください。</p><h3>うまく隠れないとき</h3><p>黒字の答えや、赤以外の色は隠れません。図や写真の赤い部分も隠れます。PDFの色・画質によっては完全に隠れない場合があるため、学習前に確認してください。教材の取り扱いは学校・配信元のルールに従ってください。</p><p className="muted">このアプリは、ロイロノート・スクールの公式アプリではありません。</p></div><button className="button primary full" onClick={dismissModal}>わかりました <Check size={17} /></button></Modal>}
+    {modal === 'help' && <Modal title="赤シートの使い方" close={dismissModal}><div className="help-content"><p className="modal-lead">いつもの教材で、隠す → 考える → 確かめる。</p><ol className="help-steps"><li><strong>教材のPDFを端末に保存</strong><p>ロイロノート・スクールなどで教材を開き、「共有」「書き出す」などからPDFを「ファイル」や「ダウンロード」に保存します。操作名は配信サービス・端末で異なります。</p></li><li><strong>「PDFを選ぶ」から取り込む</strong><p>保存したPDFを選択。iPhone・iPadでも「ファイル」から読み込めます。学校アカウントとの直接連携はありません。</p></li><li><strong>赤シートを切り替えて暗記</strong><p>ONで赤い文字を隠し、OFFで答えを表示。「押して答えを見る」は、押している間だけ答えを表示します。赤字が残る場合は「調整」で感度を上げてください。</p></li></ol><div className="info-box"><Keyboard size={19} /><p><strong>パソコンのショートカット</strong><br />Space：赤シート切り替え　← →：ページ移動<br />B：しおり　Esc：ライブラリに戻る</p></div><h3>保存とプライバシー</h3><p>PDF・しおり・読んだページは、この端末のこのブラウザだけに保存され、ゲストと各アカウントで分けて表示されます。ログインしても、教材をサーバーにアップロードすることはありません。ログイン用のメールアドレスなどは認証サービスのSupabaseへ送信されます。ブラウザのデータ削除で教材も消えるため、元のPDFは保管してください。共有端末では使用後にライブラリから教材を削除してください。</p><h3>うまく隠れないとき</h3><p>黒字の答えや、赤以外の色は隠れません。図や写真の赤い部分も隠れます。PDFの色・画質によっては完全に隠れない場合があるため、学習前に確認してください。教材の取り扱いは学校・配信元のルールに従ってください。</p><p className="muted">このアプリは、ロイロノート・スクールの公式アプリではありません。</p></div><button className="button primary full" onClick={dismissModal}>わかりました <Check size={17} /></button></Modal>}
     {modal === 'url' && <Modal title="URLからPDFを読み込む" close={dismissModal}><form onSubmit={e => void importUrl(e)}><p className="modal-lead">公開されたPDFの直接リンクを入力してください。</p><label className="form-label">PDFのURL<input autoFocus type="url" value={url} onChange={e => setUrl(e.target.value)} placeholder="https://example.com/sheet.pdf" required /></label><div className="info-box"><CircleHelp size={20} /><p>ログインが必要な学校サービスや、外部からの読み込みを制限したURLは取得できません。その場合は、PDFを端末に保存してから追加してください。</p></div><button className="button primary full" type="submit" disabled={!!busy || !url}>{busy ? <LoaderCircle className="spin" size={18} /> : <Link2 size={17} />} 読み込む</button></form></Modal>}
     {modal === 'storage' && <Modal title="この端末の保存状況" close={dismissModal}><div className="storage-stats"><div><strong>{sheets.length}<small>冊</small></strong><span>保存した教材</span></div><div><strong>{sizeText(totalBytes)}</strong><span>PDFの使用容量</span></div></div><div className="info-box"><ShieldCheck size={22} /><p>教材はこのブラウザ内に保存されています。他の端末やブラウザとは同期されません。元のPDFはお手元にも残してください。</p></div><p className="modal-lead">教材の削除・名前・教科の変更は、各教材の「…」からできます。</p></Modal>}
     {editing && <Modal title="教材の設定" close={() => setEditing(null)}><form onSubmit={e => { e.preventDefault(); const updated = { ...editing, name: editing.name.trim() || '名称未設定' }; void persist(updated).then(() => { setEditing(null); notify('教材の設定を保存しました'); }).catch(() => notify('設定を保存できませんでした。', true)); }}><label className="form-label">教材名<input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} maxLength={140} required /></label><label className="form-label">教科<select value={editing.subject} onChange={e => setEditing({ ...editing, subject: e.target.value })}>{SUBJECTS.map(s => <option key={s}>{s}</option>)}</select></label><button className="button primary full" type="submit"><Check size={17} /> 保存する</button><button type="button" className="delete-link" onClick={() => { setDeleting(editing); setEditing(null); }}><Trash2 size={16} /> この教材を削除</button></form></Modal>}
-    {deleting && <Modal title="教材を削除しますか？" close={() => setDeleting(null)}><p className="modal-lead">「{deleting.name}」をこのブラウザから削除します。しおりと読んだページの記録も削除されます。</p><div className="dialog-actions"><button className="button secondary" onClick={() => setDeleting(null)}>キャンセル</button><button className="button primary" onClick={() => { void deleteSheet(deleting.id).then(() => { setSheets(all => all.filter(s => s.id !== deleting.id)); setDeleting(null); notify('教材を削除しました'); }).catch(() => notify('削除できませんでした。', true)); }}><Trash2 size={16} /> 削除する</button></div></Modal>}
+    {deleting && <Modal title="教材を削除しますか？" close={() => setDeleting(null)}><p className="modal-lead">「{deleting.name}」をこのブラウザから削除します。しおりと読んだページの記録も削除されます。</p><div className="dialog-actions"><button className="button secondary" onClick={() => setDeleting(null)}>キャンセル</button><button className="button primary" onClick={() => { void deleteSheet(deleting.id, ownerId).then(() => { setSheets(all => all.filter(s => s.id !== deleting.id)); setDeleting(null); notify('教材を削除しました'); }).catch(() => notify('削除できませんでした。', true)); }}><Trash2 size={16} /> 削除する</button></div></Modal>}
     {busy && <div className="busy-pill" role="status"><LoaderCircle size={18} className="spin" />{busy}</div>}
     {notice && <div className={`toast ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>{notice.error ? <CircleHelp size={19} /> : <CheckCircle2 size={19} />}<span>{notice.text}</span><button aria-label="通知を閉じる" onClick={() => setNotice(null)}><X size={16} /></button></div>}
   </>;

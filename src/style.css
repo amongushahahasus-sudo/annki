@@ -12,3 +12,6 @@
 .icon-button.mobile-help{display:none}
 @media(max-width:720px){.icon-button.mobile-help{display:flex}}
 @media(max-width:480px){.hero{overflow:clip}}
+
+.auth-initializing{min-height:100dvh;display:flex;align-items:center;justify-content:center;gap:13px;color:#919b82;font-size:12px}.topbar-actions{display:flex;align-items:center;gap:17px;min-width:0}.guest-import-banner{display:flex;align-items:center;gap:13px;background:#f0eee0;border:1px solid #e3dfce;padding:15px 18px;border-radius:8px;margin-bottom:24px;color:#8b9578}.guest-import-banner>svg{flex-shrink:0}.guest-import-banner strong{font-size:11px;color:#7e8b67;font-weight:500}.guest-import-banner p{font-size:9px;line-height:1.9;margin-top:5px}.guest-import-banner .button{margin-left:auto;flex-shrink:0;font-size:9px;padding:9px 13px;min-height:35px}
+@media(max-width:720px){.topbar-actions{gap:7px}.guest-import-banner{padding:14px;gap:10px;flex-wrap:wrap}.guest-import-banner>div{flex:1;min-width:150px}.guest-import-banner .button{margin-left:30px}.guest-import-banner strong{font-size:10px}.guest-import-banner p{font-size:8px}}

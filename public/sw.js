@@ -6,6 +6,9 @@ self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin || !request.url.startsWith(ROOT.href)) return;
+  // OAuth callback codes and error details must not be written to the offline cache.
+  const params = new URL(request.url).searchParams;
+  if (['code', 'sb_flow_id', 'token_hash', 'access_token', 'refresh_token', 'error', 'error_code', 'error_description'].some(key => params.has(key))) return;
   event.respondWith(fetch(request).then(response => {
     if (response.ok && !request.headers.has('range')) { const copy = response.clone(); void caches.open(CACHE).then(cache => cache.put(request, copy)); }
     return response;
